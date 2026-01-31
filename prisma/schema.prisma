@@ -1,20 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-/*
-generator client {
-  provider = "prisma-client"
-  output   = "../app/generated/prisma"
-}
-
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-*/
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -24,7 +7,185 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/* ===================== USERS ===================== */
+
 model User {
-  id    String @id @default(cuid())
-  email String @unique
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+
+  /*
+    🔐 NFC IDENTITY (PRIMARY)
+    - Hash of card-stored secret
+    - Used for NFC authorization
+  */
+  cardSecretHash String?  @unique
+
+  /*
+    🧾 OPTIONAL / LEGACY
+    - Old RFID UID (do NOT use for auth)
+    - Can be removed later after migration
+  */
+  rfidUid       String?   @unique
+
+  balance       Int        @default(0)
+  status        UserStatus @default(ACTIVE)
+
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  transactions  Transaction[] @relation("UserTransactions")
 }
+
+/* ===================== ADMINS ===================== */
+
+model Admin {
+  id           String      @id @default(cuid())
+  name         String
+  email        String      @unique
+  passwordHash String
+  status       AdminStatus @default(ACTIVE)
+  lastLoginAt  DateTime?
+
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  pin                  AdminPin?
+  actions              AdminActionLog[] @relation("AdminActions")
+  approvedTransactions Transaction[]    @relation("AdminApprovedTransactions")
+}
+
+model AdminPin {
+  id             String   @id @default(cuid())
+  adminId        String   @unique
+  pinHash        String
+  failedAttempts Int      @default(0)
+  isActive       Boolean  @default(true)
+  lastUsedAt     DateTime?
+  rotatedAt      DateTime?
+  createdAt      DateTime @default(now())
+
+  admin Admin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+}
+
+model AdminActionLog {
+  id               String          @id @default(cuid())
+  adminId          String
+  actionType       AdminActionType
+  targetType       String
+  targetIdentifier String
+  metadata         Json?
+  ipAddress        String?
+  userAgent        String?
+  createdAt        DateTime        @default(now())
+
+  admin Admin @relation("AdminActions", fields: [adminId], references: [id])
+}
+
+/* ===================== MERCHANTS ===================== */
+
+model Merchant {
+  id           String         @id @default(cuid())
+  name         String
+  email        String         @unique
+  passwordHash String
+  status       MerchantStatus @default(ACTIVE)
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  transactions   MerchantTransaction[]
+  paymentRequests PaymentRequest[]
+}
+
+
+model MerchantTransaction {
+  id         String   @id @default(cuid())
+  merchantId String
+  txId       String
+  createdAt  DateTime @default(now())
+
+  merchant Merchant    @relation(fields: [merchantId], references: [id])
+  tx       Transaction @relation(fields: [txId], references: [id])
+}
+
+model PaymentRequest {
+  id         String   @id @default(cuid())
+  merchantId String
+  amount     Int
+  status     PaymentRequestStatus @default(PENDING)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  merchant Merchant @relation(fields: [merchantId], references: [id])
+}
+
+
+
+/* ===================== TRANSACTIONS ===================== */
+
+model Transaction {
+  id                String            @id @default(cuid())
+  userId            String
+  amount            Int
+  type              TransactionType
+  status            TransactionStatus
+  deviceId          String?
+  clientTxId        String            @unique
+  approvedByAdminId String?
+  createdAt         DateTime          @default(now())
+
+  user  User   @relation("UserTransactions", fields: [userId], references: [id])
+  admin Admin? @relation("AdminApprovedTransactions", fields: [approvedByAdminId], references: [id])
+
+  merchantLinks MerchantTransaction[]
+}
+
+/* ===================== ENUMS ===================== */
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum AdminStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum MerchantStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum TransactionType {
+  DEBIT
+  CREDIT
+}
+
+enum TransactionStatus {
+  SUCCESS
+  FAILED
+  QUEUED
+}
+
+enum AdminActionType {
+  CREATE_USER
+  DELETE_USER
+  BLOCK_USER
+  UNBLOCK_USER
+  REASSIGN_UID
+  TOP_UP
+  CREATE_ADMIN
+  BLOCK_ADMIN
+  CREATE_MERCHANT
+  BLOCK_MERCHANT
+}
+
+enum PaymentRequestStatus {
+  PENDING
+  USED
+  EXPIRED
+}
+
