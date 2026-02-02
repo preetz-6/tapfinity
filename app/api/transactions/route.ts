@@ -9,7 +9,11 @@ type TxType = "DEBIT" | "CREDIT";
 export async function GET() {
   const session = await getServerSession(authOptions);
 
-  if (!session || (session.user as any).role !== "ADMIN") {
+  type SessionUser = {
+  role?: "ADMIN" | "USER" | "MERCHANT";
+};
+
+  if (!session || (session.user as SessionUser).role !== "ADMIN") {
     return NextResponse.json(
       { error: "Unauthorized" },
       { status: 401 }
@@ -70,7 +74,7 @@ export async function POST(req: Request) {
 
     // -------- Fetch user --------
     const user = await prisma.user.findUnique({
-      where: { uid },
+      where: { rfidUid: uid },
     });
 
     if (!user) {
