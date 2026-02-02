@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  /* ---------- KPI COUNTS ---------- */
+  /* ---------- USER KPIs ---------- */
   const [
     totalUsers,
     activeUsers,
@@ -25,6 +25,17 @@ export async function GET(req: NextRequest) {
     prisma.user.aggregate({
       _sum: { balance: true },
     }),
+  ]);
+
+  /* ---------- MERCHANT KPIs ---------- */
+  const [
+    totalMerchants,
+    activeMerchants,
+    blockedMerchants,
+  ] = await Promise.all([
+    prisma.merchant.count(),
+    prisma.merchant.count({ where: { status: "ACTIVE" } }),
+    prisma.merchant.count({ where: { status: "BLOCKED" } }),
   ]);
 
   /* ---------- LAST 7 DAYS TX (LINE CHART) ---------- */
@@ -50,7 +61,7 @@ export async function GET(req: NextRequest) {
     return { day, count };
   });
 
-  /* ---------- TX TYPE SPLIT (PIE) ---------- */
+  /* ---------- TX TYPE SPLIT ---------- */
   const txTypeSplit = await prisma.transaction.groupBy({
     by: ["type"],
     _count: { _all: true },
@@ -70,16 +81,23 @@ export async function GET(req: NextRequest) {
     take: 5,
     orderBy: { createdAt: "desc" },
     include: {
-      admin: { select: { name: true, email: true } },
+      admin: { select: { name: true } },
     },
   });
 
   return NextResponse.json({
     kpis: {
-      totalUsers,
-      activeUsers,
-      blockedUsers,
-      totalBalance: totalBalanceAgg._sum.balance ?? 0,
+      users: {
+        total: totalUsers,
+        active: activeUsers,
+        blocked: blockedUsers,
+        totalBalance: totalBalanceAgg._sum.balance ?? 0,
+      },
+      merchants: {
+        total: totalMerchants,
+        active: activeMerchants,
+        blocked: blockedMerchants,
+      },
     },
     txByDay,
     txTypeSplit,

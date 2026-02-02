@@ -10,32 +10,33 @@ export async function middleware(req: NextRequest) {
 
   const pathname = req.nextUrl.pathname;
 
-  /* ===================== ADMIN ROUTES ===================== */
+  /* ---------------- ADMIN ROUTES ---------------- */
   if (pathname.startsWith("/admin")) {
     if (!token) {
       return NextResponse.redirect(new URL("/login", req.url));
     }
-
     if (token.role !== "ADMIN") {
-      return NextResponse.redirect(new URL("/dashboard", req.url));
+      return NextResponse.redirect(new URL("/", req.url));
     }
   }
 
-  /* ===================== MERCHANT ROUTES ===================== */
+  /* ---------------- MERCHANT ROUTES ---------------- */
   if (pathname.startsWith("/merchant")) {
     if (!token) {
       return NextResponse.redirect(new URL("/login", req.url));
     }
-
     if (token.role !== "MERCHANT") {
-      return NextResponse.redirect(new URL("/dashboard", req.url));
+      return NextResponse.redirect(new URL("/", req.url));
     }
   }
 
-  /* ===================== USER DASHBOARD ===================== */
+  /* ---------------- USER DASHBOARD ---------------- */
   if (pathname.startsWith("/dashboard")) {
     if (!token) {
       return NextResponse.redirect(new URL("/login", req.url));
+    }
+    if (token.role !== "USER") {
+      return NextResponse.redirect(new URL("/", req.url));
     }
   }
 
@@ -43,5 +44,9 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/merchant/:path*", "/dashboard/:path*"],
+  matcher: [
+    "/admin/:path*",
+    "/merchant/:path*",
+    "/dashboard/:path*",
+  ],
 };

@@ -1,5 +1,4 @@
-import NextAuth from "next-auth";
-import type { NextAuthOptions } from "next-auth";
+import NextAuth, { type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcrypt";
 import { prisma } from "./prisma";
@@ -25,30 +24,27 @@ export const authOptions: NextAuthOptions = {
       },
 
       async authorize(credentials) {
-        if (!credentials?.email || !credentials.password) {
-          return null;
-        }
+        if (!credentials?.email || !credentials.password) return null;
 
         const admin = await prisma.admin.findUnique({
           where: { email: credentials.email },
         });
 
-        if (!admin) return null;
-        if (admin.status !== "ACTIVE") return null;
+        if (!admin || admin.status !== "ACTIVE") return null;
 
-        const isValid = await bcrypt.compare(
+        const valid = await bcrypt.compare(
           credentials.password,
           admin.passwordHash
         );
 
-        if (!isValid) return null;
+        if (!valid) return null;
 
         return {
           id: admin.id,
           email: admin.email,
           name: admin.name,
           role: "ADMIN",
-        } as any;
+        };
       },
     }),
 
@@ -62,30 +58,61 @@ export const authOptions: NextAuthOptions = {
       },
 
       async authorize(credentials) {
-        if (!credentials?.email || !credentials.password) {
-          return null;
-        }
+        if (!credentials?.email || !credentials.password) return null;
 
         const merchant = await prisma.merchant.findUnique({
           where: { email: credentials.email },
         });
 
-        if (!merchant) return null;
-        if (merchant.status !== "ACTIVE") return null;
+        if (!merchant || merchant.status !== "ACTIVE") return null;
 
-        const isValid = await bcrypt.compare(
+        const valid = await bcrypt.compare(
           credentials.password,
           merchant.passwordHash
         );
 
-        if (!isValid) return null;
+        if (!valid) return null;
 
         return {
           id: merchant.id,
           email: merchant.email,
           name: merchant.name,
           role: "MERCHANT",
-        } as any;
+        };
+      },
+    }),
+
+    /* ===================== USER LOGIN ===================== */
+    CredentialsProvider({
+      id: "user-credentials",
+      name: "UserCredentials",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
+      },
+
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials.password) return null;
+
+        const user = await prisma.user.findUnique({
+          where: { email: credentials.email },
+        });
+
+        if (!user || user.status !== "ACTIVE") return null;
+
+        const valid = await bcrypt.compare(
+          credentials.password,
+          user.passwordHash
+        );
+
+        if (!valid) return null;
+
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: "USER",
+        };
       },
     }),
   ],
@@ -93,17 +120,15 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.id = (user as any).id;
-        token.role = (user as any).role;
+        token.id = user.id;
+        token.role = user.role;
       }
       return token;
     },
 
     async session({ session, token }) {
-      if (session.user) {
-        (session.user as any).id = token.id;
-        (session.user as any).role = token.role;
-      }
+      session.user.id = token.id;
+      session.user.role = token.role;
       return session;
     },
   },

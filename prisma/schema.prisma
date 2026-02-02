@@ -7,38 +7,46 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/* ===================== USERS ===================== */
+/**
+ * ===================== USERS =====================
+ */
 
 model User {
-  id           String     @id @default(cuid())
+  id           String @id @default(cuid())
   name         String
-  email        String     @unique
+  email        String @unique
   passwordHash String
 
-  /*
-    🔐 NFC IDENTITY (PRIMARY)
-    - Hash of card-stored secret
-    - Used for NFC authorization
-  */
-  cardSecretHash String?  @unique
+  /**
+   * 🔐 NFC IDENTITY (PRIMARY)
+   * - Hash of card-stored secret
+   * - Used for NFC authorization
+   */
+  cardSecretHash String? @unique
 
-  /*
-    🧾 OPTIONAL / LEGACY
-    - Old RFID UID (do NOT use for auth)
-    - Can be removed later after migration
-  */
-  rfidUid       String?   @unique
+  /**
+   * 🧾 OPTIONAL / LEGACY
+   * - Old RFID UID (do NOT use for auth)
+   * - Can be removed later after migration
+   */
+  rfidUid String? @unique
 
-  balance       Int        @default(0)
-  status        UserStatus @default(ACTIVE)
+  balance Int        @default(0)
+  status  UserStatus @default(ACTIVE)
 
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  transactions  Transaction[] @relation("UserTransactions")
+  transactions Transaction[] @relation("UserTransactions")
+
+  paymentAttempts PaymentAttemptLog[]
+
+  provisionRequests ProvisionCardRequest[]
 }
 
-/* ===================== ADMINS ===================== */
+/**
+ * ===================== ADMINS =====================
+ */
 
 model Admin {
   id           String      @id @default(cuid())
@@ -48,23 +56,25 @@ model Admin {
   status       AdminStatus @default(ACTIVE)
   lastLoginAt  DateTime?
 
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   pin                  AdminPin?
   actions              AdminActionLog[] @relation("AdminActions")
   approvedTransactions Transaction[]    @relation("AdminApprovedTransactions")
+
+  provisionRequests ProvisionCardRequest[]
 }
 
 model AdminPin {
-  id             String   @id @default(cuid())
-  adminId        String   @unique
+  id             String    @id @default(cuid())
+  adminId        String    @unique
   pinHash        String
-  failedAttempts Int      @default(0)
-  isActive       Boolean  @default(true)
+  failedAttempts Int       @default(0)
+  isActive       Boolean   @default(true)
   lastUsedAt     DateTime?
   rotatedAt      DateTime?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
 
   admin Admin @relation(fields: [adminId], references: [id], onDelete: Cascade)
 }
@@ -83,7 +93,9 @@ model AdminActionLog {
   admin Admin @relation("AdminActions", fields: [adminId], references: [id])
 }
 
-/* ===================== MERCHANTS ===================== */
+/**
+ * ===================== MERCHANTS =====================
+ */
 
 model Merchant {
   id           String         @id @default(cuid())
@@ -92,13 +104,14 @@ model Merchant {
   passwordHash String
   status       MerchantStatus @default(ACTIVE)
 
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  transactions   MerchantTransaction[]
+  transactions    MerchantTransaction[]
   paymentRequests PaymentRequest[]
-}
 
+  paymentAttempts PaymentAttemptLog[]
+}
 
 model MerchantTransaction {
   id         String   @id @default(cuid())
@@ -111,19 +124,34 @@ model MerchantTransaction {
 }
 
 model PaymentRequest {
-  id         String   @id @default(cuid())
+  id         String               @id @default(cuid())
   merchantId String
   amount     Int
   status     PaymentRequestStatus @default(PENDING)
   expiresAt  DateTime
-  createdAt  DateTime @default(now())
+  createdAt  DateTime             @default(now())
 
   merchant Merchant @relation(fields: [merchantId], references: [id])
 }
 
+model PaymentAttemptLog {
+  id               String        @id @default(cuid())
+  merchantId       String
+  userId           String?
+  paymentRequestId String?
+  amount           Int
+  status           AttemptStatus
+  failureReason    String?
+  ipAddress        String?
+  createdAt        DateTime      @default(now())
 
+  merchant Merchant @relation(fields: [merchantId], references: [id])
+  user     User?    @relation(fields: [userId], references: [id])
+}
 
-/* ===================== TRANSACTIONS ===================== */
+/**
+ * ===================== TRANSACTIONS =====================
+ */
 
 model Transaction {
   id                String            @id @default(cuid())
@@ -142,7 +170,24 @@ model Transaction {
   merchantLinks MerchantTransaction[]
 }
 
-/* ===================== ENUMS ===================== */
+model ProvisionCardRequest {
+  id        String          @id @default(cuid())
+  userId    String
+  adminId   String
+  status    ProvisionStatus @default(PENDING)
+  expiresAt DateTime
+  createdAt DateTime        @default(now())
+
+  user  User  @relation(fields: [userId], references: [id])
+  admin Admin @relation(fields: [adminId], references: [id])
+
+  @@index([userId])
+  @@index([adminId])
+}
+
+/**
+ * ===================== ENUMS =====================
+ */
 
 enum UserStatus {
   ACTIVE
@@ -181,6 +226,7 @@ enum AdminActionType {
   BLOCK_ADMIN
   CREATE_MERCHANT
   BLOCK_MERCHANT
+  UNBLOCK_MERCHANT
 }
 
 enum PaymentRequestStatus {
@@ -189,3 +235,13 @@ enum PaymentRequestStatus {
   EXPIRED
 }
 
+enum AttemptStatus {
+  SUCCESS
+  FAILED
+}
+
+enum ProvisionStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+}

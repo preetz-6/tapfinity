@@ -3,6 +3,7 @@ import { getToken } from "next-auth/jwt";
 import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
 import { verifyAdminPin } from "@/lib/verifyAdminPin";
+import { Prisma, AdminActionType } from "@prisma/client";
 
 /* ===================== HELPERS ===================== */
 
@@ -21,10 +22,10 @@ async function requireAdmin(req: NextRequest) {
 
 async function logAdminAction(params: {
   adminId: string;
-  actionType: any;
+  actionType: AdminActionType;
   targetType: string;
   targetIdentifier: string;
-  metadata?: any;
+  metadata?: Prisma.InputJsonValue;
   req: NextRequest;
 }) {
   await prisma.adminActionLog.create({
@@ -34,7 +35,10 @@ async function logAdminAction(params: {
       targetType: params.targetType,
       targetIdentifier: params.targetIdentifier,
       metadata: params.metadata,
-      ipAddress: params.req.ip ?? null,
+      ipAddress:
+        params.req.headers.get("x-forwarded-for")?.split(",")[0] ??
+        params.req.headers.get("x-real-ip") ??
+        null,
       userAgent: params.req.headers.get("user-agent"),
     },
   });
@@ -52,9 +56,9 @@ export async function GET(req: NextRequest) {
         id: true,
         name: true,
         email: true,
-        rfidUid: true,
         balance: true,
         status: true,
+        cardSecretHash: true, // ✅ used only for UI (has card or not)
         createdAt: true,
       },
     });
@@ -107,20 +111,26 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ ok: true, user });
-  } catch (e: any) {
-    if (e.message === "UNAUTHORIZED") {
+  } catch (e) {
+    if (e instanceof Error && e.message === "UNAUTHORIZED") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
 
-/* ===================== PATCH: UID | BLOCK | TOP-UP (PIN ENFORCED) ===================== */
+/* ===================== PATCH: BLOCK / TOP-UP ===================== */
 
 export async function PATCH(req: NextRequest) {
   try {
     const token = await requireAdmin(req);
-    const body = await req.json();
+    const body: {
+      userId?: string;
+      status?: "ACTIVE" | "BLOCKED";
+      amount?: number;
+      pin?: string;
+    } = await req.json();
+
     const adminId = token.id as string;
 
     const isSensitive =
@@ -144,39 +154,7 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    /* ---------- ASSIGN / CHANGE RFID UID (NO PIN) ---------- */
-    if (body.userId && body.rfidUid !== undefined) {
-      if (body.rfidUid) {
-        const owner = await prisma.user.findUnique({
-          where: { rfidUid: body.rfidUid },
-        });
-
-        if (owner && owner.id !== body.userId) {
-          return NextResponse.json(
-            { error: "RFID UID already assigned" },
-            { status: 409 }
-          );
-        }
-      }
-
-      const user = await prisma.user.update({
-        where: { id: body.userId },
-        data: { rfidUid: body.rfidUid || null },
-      });
-
-      await logAdminAction({
-        adminId,
-        actionType: "REASSIGN_UID",
-        targetType: "USER",
-        targetIdentifier: user.email,
-        metadata: { rfidUid: body.rfidUid },
-        req,
-      });
-
-      return NextResponse.json({ ok: true, user });
-    }
-
-    /* ---------- BLOCK / UNBLOCK USER ---------- */
+    /* ---------- BLOCK / UNBLOCK ---------- */
     if (body.userId && body.status) {
       const user = await prisma.user.update({
         where: { id: body.userId },
@@ -195,7 +173,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ ok: true, user });
     }
 
-    /* ---------- TOP-UP BALANCE ---------- */
+    /* ---------- TOP-UP ---------- */
     if (body.userId && typeof body.amount === "number") {
       const user = await prisma.user.findUnique({
         where: { id: body.userId },
@@ -244,8 +222,8 @@ export async function PATCH(req: NextRequest) {
     }
 
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
-  } catch (e: any) {
-    if (e.message === "UNAUTHORIZED") {
+  } catch (e) {
+    if (e instanceof Error && e.message === "UNAUTHORIZED") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     return NextResponse.json({ error: "Server error" }, { status: 500 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function PinModal({
   open,
@@ -16,6 +16,13 @@ export default function PinModal({
   error?: string;
 }) {
   const [pin, setPin] = useState("");
+
+  // 🔥 RESET PIN EVERY TIME MODAL OPENS
+  useEffect(() => {
+    if (open) {
+      setPin("");
+    }
+  }, [open]);
 
   if (!open) return null;
 
@@ -43,10 +50,7 @@ export default function PinModal({
 
         <div className="mt-6 flex gap-3">
           <button
-            onClick={() => {
-              setPin("");
-              onClose();
-            }}
+            onClick={onClose}
             className="flex-1 rounded-lg border border-white/10 py-2 text-sm"
             disabled={loading}
           >

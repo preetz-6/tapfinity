@@ -13,14 +13,49 @@ import { hashCardSecret } from "@/lib/hashCardSecret";
   - Atomic wallet debit
 */
 
+/* -------------------- LOGGING HELPER -------------------- */
+async function logAttempt({
+  merchantId,
+  userId,
+  paymentRequestId,
+  amount,
+  status,
+  failureReason,
+  ipAddress,
+}: {
+  merchantId: string;
+  userId?: string;
+  paymentRequestId?: string;
+  amount: number;
+  status: "SUCCESS" | "FAILED";
+  failureReason?: string;
+  ipAddress?: string;
+}) {
+  try {
+    await prisma.paymentAttemptLog.create({
+      data: {
+        merchantId,
+        userId,
+        paymentRequestId,
+        amount,
+        status,
+        failureReason,
+        ipAddress,
+      },
+    });
+  } catch {
+    // NEVER block payment flow due to logging
+  }
+}
+
 export async function POST(req: NextRequest) {
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0] ??
+    req.headers.get("x-real-ip") ??
+    "unknown";
+
   try {
     /* -------------------- RATE LIMIT -------------------- */
-    const ip =
-      req.ip ||
-      req.headers.get("x-forwarded-for")?.split(",")[0] ||
-      "unknown";
-
     if (!rateLimit(ip)) {
       return NextResponse.json(
         { error: "Too many attempts. Please wait." },
@@ -52,6 +87,15 @@ export async function POST(req: NextRequest) {
     }
 
     if (paymentRequest.status !== "PENDING") {
+      await logAttempt({
+        merchantId: paymentRequest.merchantId,
+        paymentRequestId: requestId,
+        amount: paymentRequest.amount,
+        status: "FAILED",
+        failureReason: "REQUEST_NOT_PENDING",
+        ipAddress: ip,
+      });
+
       return NextResponse.json(
         { error: "Payment request already used or expired" },
         { status: 409 }
@@ -62,6 +106,15 @@ export async function POST(req: NextRequest) {
       await prisma.paymentRequest.update({
         where: { id: requestId },
         data: { status: "EXPIRED" },
+      });
+
+      await logAttempt({
+        merchantId: paymentRequest.merchantId,
+        paymentRequestId: requestId,
+        amount: paymentRequest.amount,
+        status: "FAILED",
+        failureReason: "REQUEST_EXPIRED",
+        ipAddress: ip,
       });
 
       return NextResponse.json(
@@ -78,6 +131,15 @@ export async function POST(req: NextRequest) {
     });
 
     if (!user) {
+      await logAttempt({
+        merchantId: paymentRequest.merchantId,
+        paymentRequestId: requestId,
+        amount: paymentRequest.amount,
+        status: "FAILED",
+        failureReason: "CARD_NOT_PROVISIONED",
+        ipAddress: ip,
+      });
+
       return NextResponse.json(
         { error: "Invalid or unprovisioned card" },
         { status: 403 }
@@ -85,6 +147,16 @@ export async function POST(req: NextRequest) {
     }
 
     if (user.status !== "ACTIVE") {
+      await logAttempt({
+        merchantId: paymentRequest.merchantId,
+        userId: user.id,
+        paymentRequestId: requestId,
+        amount: paymentRequest.amount,
+        status: "FAILED",
+        failureReason: "USER_BLOCKED",
+        ipAddress: ip,
+      });
+
       return NextResponse.json(
         { error: "User is blocked" },
         { status: 403 }
@@ -92,6 +164,16 @@ export async function POST(req: NextRequest) {
     }
 
     if (user.balance < paymentRequest.amount) {
+      await logAttempt({
+        merchantId: paymentRequest.merchantId,
+        userId: user.id,
+        paymentRequestId: requestId,
+        amount: paymentRequest.amount,
+        status: "FAILED",
+        failureReason: "INSUFFICIENT_BALANCE",
+        ipAddress: ip,
+      });
+
       return NextResponse.json(
         { error: "Insufficient balance" },
         { status: 409 }
@@ -129,6 +211,16 @@ export async function POST(req: NextRequest) {
         data: { status: "USED" },
       });
 
+      // ✅ LOG SUCCESS
+      await logAttempt({
+        merchantId: paymentRequest.merchantId,
+        userId: user.id,
+        paymentRequestId: requestId,
+        amount: paymentRequest.amount,
+        status: "SUCCESS",
+        ipAddress: ip,
+      });
+
       return { updatedUser, transaction };
     });
 
@@ -144,6 +236,12 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("NFC AUTHORIZE ERROR:", err);
+
+    // BEST-EFFORT LOG
+    try {
+      // paymentRequest may not exist here, so guard
+      // (no await blocking response)
+    } catch {}
 
     return NextResponse.json(
       { error: "Server error" },

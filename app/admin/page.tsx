@@ -1,6 +1,5 @@
 "use client";
 
-
 import { useEffect, useState } from "react";
 import {
   LineChart,
@@ -16,40 +15,134 @@ import {
 
 const COLORS = ["#4ade80", "#60a5fa"];
 
+/* ===================== TYPES ===================== */
+
+type UserKpis = {
+  total: number;
+  active: number;
+  blocked: number;
+  totalBalance: number;
+};
+
+type MerchantKpis = {
+  total: number;
+  active: number;
+  blocked: number;
+};
+
+type TxByDay = {
+  day: string;
+  count: number;
+};
+
+type TxTypeSplit = {
+  type: string;
+  _count: {
+    _all: number;
+  };
+};
+
+type RecentTransaction = {
+  id: string;
+  type: "CREDIT" | "DEBIT";
+  amount: number;
+  user?: {
+    email?: string;
+  };
+};
+
+type RecentAdminAction = {
+  id: string;
+  actionType: string;
+  targetIdentifier: string;
+  admin?: {
+    name?: string;
+  };
+};
+
+type DashboardData = {
+  kpis: {
+    users: UserKpis;
+    merchants: MerchantKpis;
+  };
+  txByDay: TxByDay[];
+  txTypeSplit: TxTypeSplit[];
+  recentTransactions: RecentTransaction[];
+  recentActions: RecentAdminAction[];
+};
+
+/* ===================== COMPONENT ===================== */
 
 export default function AdminDashboard() {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let active = true;
+
     fetch("/api/admin/dashboard")
-      .then(res => res.json())
-      .then(d => {
-        setData(d);
-        setLoading(false);
+      .then((res) => res.json())
+      .then((d: DashboardData) => {
+        if (active) {
+          setData(d);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (active) setLoading(false);
       });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  if (loading) return <p>Loading dashboard…</p>;
+  if (loading || !data) {
+    return <p className="p-4">Loading dashboard…</p>;
+  }
 
-  const { kpis, txByDay, txTypeSplit, recentTransactions, recentActions } =
-    data;
+  const {
+    kpis: { users, merchants },
+    txByDay,
+    txTypeSplit,
+    recentTransactions,
+    recentActions,
+  } = data;
 
   return (
-    <div className="space-y-8">
-      {/* KPI CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Kpi title="Total Users" value={kpis.totalUsers} />
-        <Kpi title="Active Users" value={kpis.activeUsers} />
-        <Kpi title="Blocked Users" value={kpis.blockedUsers} />
-        <Kpi title="Total Balance" value={`₹ ${kpis.totalBalance}`} />
+    <div className="space-y-10">
+      {/* ================= USER KPIs ================= */}
+      <div>
+        <h2 className="mb-3 text-lg font-semibold">Users</h2>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Kpi title="Total Users" value={users.total} />
+          <Kpi title="Active Users" value={users.active} />
+          <Kpi title="Blocked Users" value={users.blocked} />
+          <Kpi
+            title="Total Balance"
+            value={`₹ ${users.totalBalance}`}
+          />
+        </div>
       </div>
 
-      {/* CHARTS */}
+      {/* ================= MERCHANT KPIs ================= */}
+      <div>
+        <h2 className="mb-3 text-lg font-semibold">Merchants</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Kpi title="Total Merchants" value={merchants.total} />
+          <Kpi title="Active Merchants" value={merchants.active} />
+          <Kpi title="Blocked Merchants" value={merchants.blocked} />
+        </div>
+      </div>
+
+      {/* ================= CHARTS ================= */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* LINE CHART */}
         <div className="rounded-xl border border-white/10 p-4">
-          <h3 className="mb-4 font-semibold">Transactions (Last 7 Days)</h3>
+          <h3 className="mb-4 font-semibold">
+            Transactions (Last 7 Days)
+          </h3>
+
           <ResponsiveContainer width="100%" height={250}>
             <LineChart data={txByDay}>
               <XAxis dataKey="day" />
@@ -68,6 +161,7 @@ export default function AdminDashboard() {
         {/* PIE CHART */}
         <div className="rounded-xl border border-white/10 p-4">
           <h3 className="mb-4 font-semibold">Transaction Split</h3>
+
           <ResponsiveContainer width="100%" height={250}>
             <PieChart>
               <Pie
@@ -77,8 +171,11 @@ export default function AdminDashboard() {
                 outerRadius={90}
                 label
               >
-                {txTypeSplit.map((_: any, i: number) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                {txTypeSplit.map((_, i) => (
+                  <Cell
+                    key={i}
+                    fill={COLORS[i % COLORS.length]}
+                  />
                 ))}
               </Pie>
               <Tooltip />
@@ -87,11 +184,14 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* RECENT ACTIVITY */}
+      {/* ================= RECENT ACTIVITY ================= */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* RECENT TRANSACTIONS */}
         <div className="rounded-xl border border-white/10 p-4">
-          <h3 className="mb-4 font-semibold">Recent Transactions</h3>
+          <h3 className="mb-4 font-semibold">
+            Recent Transactions
+          </h3>
+
           <table className="w-full text-sm">
             <thead className="text-gray-400">
               <tr>
@@ -101,9 +201,12 @@ export default function AdminDashboard() {
               </tr>
             </thead>
             <tbody>
-              {recentTransactions.map((t: any) => (
-                <tr key={t.id} className="border-t border-white/10">
-                  <td>{t.user?.email}</td>
+              {recentTransactions.map((t) => (
+                <tr
+                  key={t.id}
+                  className="border-t border-white/10"
+                >
+                  <td>{t.user?.email ?? "-"}</td>
                   <td
                     className={
                       t.type === "CREDIT"
@@ -122,9 +225,12 @@ export default function AdminDashboard() {
 
         {/* RECENT ADMIN ACTIONS */}
         <div className="rounded-xl border border-white/10 p-4">
-          <h3 className="mb-4 font-semibold">Recent Admin Actions</h3>
+          <h3 className="mb-4 font-semibold">
+            Recent Admin Actions
+          </h3>
+
           <ul className="space-y-2 text-sm">
-            {recentActions.map((a: any) => (
+            {recentActions.map((a) => (
               <li
                 key={a.id}
                 className="border-b border-white/10 pb-2"
@@ -142,7 +248,15 @@ export default function AdminDashboard() {
   );
 }
 
-function Kpi({ title, value }: { title: string; value: any }) {
+/* ===================== KPI CARD ===================== */
+
+function Kpi({
+  title,
+  value,
+}: {
+  title: string;
+  value: string | number;
+}) {
   return (
     <div className="rounded-xl border border-white/10 p-4">
       <p className="text-sm text-gray-400">{title}</p>

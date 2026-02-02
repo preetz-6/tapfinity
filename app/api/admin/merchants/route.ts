@@ -6,10 +6,13 @@ import { prisma } from "@/lib/prisma";
 /* ===================== HELPERS ===================== */
 
 async function requireAdmin(req: NextRequest) {
-  const token = await getToken({
+  const token = (await getToken({
     req,
     secret: process.env.NEXTAUTH_SECRET,
-  });
+  })) as {
+    id: string;
+    role: "ADMIN" | "USER" | "MERCHANT";
+  } | null;
 
   if (!token || token.role !== "ADMIN") {
     throw new Error("UNAUTHORIZED");
@@ -78,7 +81,7 @@ export async function POST(req: NextRequest) {
 
     await prisma.adminActionLog.create({
       data: {
-        adminId: token.id as string,
+        adminId: token.id,
         actionType: "CREATE_MERCHANT",
         targetType: "MERCHANT",
         targetIdentifier: merchant.email,
@@ -86,8 +89,8 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ ok: true, merchant });
-  } catch (e: any) {
-    if (e.message === "UNAUTHORIZED") {
+  } catch (e) {
+    if (e instanceof Error && e.message === "UNAUTHORIZED") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -119,7 +122,7 @@ export async function PATCH(req: NextRequest) {
 
     await prisma.adminActionLog.create({
       data: {
-        adminId: token.id as string,
+        adminId: token.id,
         actionType:
           status === "BLOCKED" ? "BLOCK_MERCHANT" : "UNBLOCK_MERCHANT",
         targetType: "MERCHANT",
@@ -128,8 +131,8 @@ export async function PATCH(req: NextRequest) {
     });
 
     return NextResponse.json({ ok: true, merchant });
-  } catch (e: any) {
-    if (e.message === "UNAUTHORIZED") {
+  } catch (e) {
+    if (e instanceof Error && e.message === "UNAUTHORIZED") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

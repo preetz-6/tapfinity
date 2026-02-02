@@ -1,62 +1,61 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import PinModal from "@/app/components/PinModal";
+import CreateUserModal from "./CreateUserModal";
+import TopUpModal from "./TopUpModal";
+import ProvisionCardModal from "./ProvisionCardModal";
 
 /* ===================== TYPES ===================== */
 type User = {
   id: string;
   name: string | null;
   email: string;
-  rfidUid: string | null;
   balance: number;
   status: "ACTIVE" | "BLOCKED";
+  cardSecretHash: string | null;
 };
 
-/* ===================== COMPONENT ===================== */
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [cardUser, setCardUser] = useState<User | null>(null);
+  const [cardPin, setCardPin] = useState("");
 
-  const [showRfidModal, setShowRfidModal] = useState(false);
-  const [showTopupModal, setShowTopupModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
-
-  const [rfidInput, setRfidInput] = useState("");
-  const [amountInput, setAmountInput] = useState("");
-  const [newName, setNewName] = useState("");
-  const [newEmail, setNewEmail] = useState("");
-  const [newPassword, setNewPassword] = useState("");
+  const [showTopupModal, setShowTopupModal] = useState(false);
 
   const [pinOpen, setPinOpen] = useState(false);
-  const [pinError, setPinError] = useState("");
   const [pinLoading, setPinLoading] = useState(false);
+  const [pinError, setPinError] = useState("");
 
-  const [pendingAction, setPendingAction] = useState<null | { payload: any }>(
-    null
-  );
-
+  /* ---------------- FETCH USERS ---------------- */
   const fetchUsers = useCallback(async () => {
-    const res = await fetch("/api/admin/users");
-    const data = await res.json();
-    setUsers(data.users || []);
-    setLoading(false);
+    try {
+      const res = await fetch("/api/admin/users");
+      const data = await res.json();
+      setUsers(data.users ?? []);
+    } catch (err) {
+      console.error("Failed to fetch users", err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
 
+  /* ---------------- SEARCH ---------------- */
   const filteredUsers = useMemo(() => {
     const q = search.toLowerCase();
     return users.filter(
       u =>
         u.name?.toLowerCase().includes(q) ||
-        u.email.toLowerCase().includes(q) ||
-        u.rfidUid?.toLowerCase().includes(q)
+        u.email.toLowerCase().includes(q)
     );
   }, [users, search]);
 
@@ -69,7 +68,7 @@ export default function AdminUsersPage() {
         <h1 className="text-2xl font-semibold">User Management</h1>
         <button
           onClick={() => setShowCreateModal(true)}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium"
+          className="rounded-lg bg-blue-600 px-4 py-2 text-sm"
         >
           + Create User
         </button>
@@ -77,7 +76,7 @@ export default function AdminUsersPage() {
 
       {/* SEARCH */}
       <input
-        placeholder="Search by name, email, or RFID"
+        placeholder="Search by name or email"
         value={search}
         onChange={e => setSearch(e.target.value)}
         className="mb-4 w-full max-w-sm rounded-lg bg-black/30 border border-white/10 p-2 text-sm"
@@ -90,7 +89,6 @@ export default function AdminUsersPage() {
             <tr>
               <th className="p-3 text-left">Name</th>
               <th className="p-3 text-left">Email</th>
-              <th className="p-3 text-left">RFID</th>
               <th className="p-3 text-left">Balance</th>
               <th className="p-3 text-left">Status</th>
               <th className="p-3 text-left">Actions</th>
@@ -101,7 +99,6 @@ export default function AdminUsersPage() {
               <tr key={u.id} className="border-t border-white/10">
                 <td className="p-3">{u.name ?? "-"}</td>
                 <td className="p-3">{u.email}</td>
-                <td className="p-3">{u.rfidUid ?? "-"}</td>
                 <td className="p-3">₹ {u.balance}</td>
                 <td className="p-3">
                   <span
@@ -115,36 +112,33 @@ export default function AdminUsersPage() {
                   </span>
                 </td>
                 <td className="p-3 flex gap-2">
+                  {/* CARD */}
                   <ActionButton
-                    label="RFID"
+                    label="Card"
                     color="blue"
                     onClick={() => {
                       setSelectedUser(u);
-                      setRfidInput(u.rfidUid ?? "");
-                      setShowRfidModal(true);
-                    }}
-                  />
-                  <ActionButton
-                    label={u.status === "ACTIVE" ? "Block" : "Unblock"}
-                    color="yellow"
-                    onClick={() => {
-                      setPendingAction({
-                        payload: {
-                          userId: u.id,
-                          status:
-                            u.status === "ACTIVE" ? "BLOCKED" : "ACTIVE",
-                        },
-                      });
                       setPinOpen(true);
                     }}
                   />
+
+                  {/* BLOCK / UNBLOCK */}
+                  <ActionButton
+                    label={u.status === "ACTIVE" ? "Block" : "Unblock"}
+                    color="yellow"
+                    onClick={async () => {
+                      setSelectedUser(u);
+                      setPinOpen(true);
+                    }}
+                  />
+
+                  {/* TOP-UP */}
                   <ActionButton
                     label="Top-up"
                     color="green"
                     disabled={u.status !== "ACTIVE"}
                     onClick={() => {
                       setSelectedUser(u);
-                      setAmountInput("");
                       setShowTopupModal(true);
                     }}
                   />
@@ -162,32 +156,56 @@ export default function AdminUsersPage() {
         error={pinError}
         onClose={() => {
           setPinOpen(false);
-          setPendingAction(null);
+          setSelectedUser(null);
           setPinError("");
         }}
         onSubmit={async pin => {
-          if (!pendingAction) return;
+          if (!selectedUser) return;
+
           setPinLoading(true);
-
-          const res = await fetch("/api/admin/users", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ...pendingAction.payload, pin }),
-          });
-
-          const data = await res.json();
           setPinLoading(false);
-
-          if (!res.ok) {
-            setPinError(data.error || "Invalid PIN");
-            return;
-          }
-
           setPinOpen(false);
-          setPendingAction(null);
-          fetchUsers();
+
+          // 👉 Card flow only (block handled elsewhere)
+          setCardUser(selectedUser);
+          setCardPin(pin);
         }}
       />
+
+      {/* PROVISION CARD */}
+      {cardUser && (
+        <ProvisionCardModal
+          open
+          user={{
+            id: cardUser.id,
+            email: cardUser.email,
+            hasCard: !!cardUser.cardSecretHash,
+          }}
+          pin={cardPin}
+          onClose={() => {
+            setCardUser(null);
+            setCardPin("");
+            fetchUsers();
+          }}
+        />
+      )}
+
+      {/* CREATE USER */}
+      <CreateUserModal
+        open={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSuccess={fetchUsers}
+      />
+
+      {/* TOP-UP */}
+      {selectedUser && (
+        <TopUpModal
+          open={showTopupModal}
+          userId={selectedUser.id}
+          onClose={() => setShowTopupModal(false)}
+          onSuccess={fetchUsers}
+        />
+      )}
     </div>
   );
 }
