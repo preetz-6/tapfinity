@@ -19,7 +19,8 @@ export default function Login() {
   /* 🔐 LOGIN PAGE GUARD */
   useEffect(() => {
     if (status === "authenticated") {
-      const role = (session?.user as any)?.role;
+      const role = session?.user?.role;
+
 
       if (role === "ADMIN") router.replace("/admin");
       else if (role === "MERCHANT") router.replace("/merchant");
