@@ -16,12 +16,15 @@ type User = {
   cardSecretHash: string | null;
 };
 
+type PinAction = "CARD" | "BLOCK";
+
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+
   const [cardUser, setCardUser] = useState<User | null>(null);
   const [cardPin, setCardPin] = useState("");
 
@@ -31,6 +34,7 @@ export default function AdminUsersPage() {
   const [pinOpen, setPinOpen] = useState(false);
   const [pinLoading, setPinLoading] = useState(false);
   const [pinError, setPinError] = useState("");
+  const [pinAction, setPinAction] = useState<PinAction | null>(null);
 
   /* ---------------- FETCH USERS ---------------- */
   const fetchUsers = useCallback(async () => {
@@ -118,6 +122,7 @@ export default function AdminUsersPage() {
                     color="blue"
                     onClick={() => {
                       setSelectedUser(u);
+                      setPinAction("CARD");
                       setPinOpen(true);
                     }}
                   />
@@ -126,8 +131,9 @@ export default function AdminUsersPage() {
                   <ActionButton
                     label={u.status === "ACTIVE" ? "Block" : "Unblock"}
                     color="yellow"
-                    onClick={async () => {
+                    onClick={() => {
                       setSelectedUser(u);
+                      setPinAction("BLOCK");
                       setPinOpen(true);
                     }}
                   />
@@ -157,16 +163,40 @@ export default function AdminUsersPage() {
         onClose={() => {
           setPinOpen(false);
           setSelectedUser(null);
+          setPinAction(null);
           setPinError("");
         }}
         onSubmit={async pin => {
-          if (!selectedUser) return;
+          if (!selectedUser || !pinAction) return;
 
           setPinLoading(true);
+
+          if (pinAction === "BLOCK") {
+            await fetch("/api/admin/users", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                userId: selectedUser.id,
+                status:
+                  selectedUser.status === "ACTIVE"
+                    ? "BLOCKED"
+                    : "ACTIVE",
+                pin,
+              }),
+            });
+
+            setPinLoading(false);
+            setPinOpen(false);
+            setPinAction(null);
+            setSelectedUser(null);
+            fetchUsers();
+            return;
+          }
+
+          // CARD FLOW (unchanged)
           setPinLoading(false);
           setPinOpen(false);
-
-          // 👉 Card flow only (block handled elsewhere)
+          setPinAction(null);
           setCardUser(selectedUser);
           setCardPin(pin);
         }}
