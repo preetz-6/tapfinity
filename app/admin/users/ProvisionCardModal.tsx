@@ -2,6 +2,25 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 
+declare global {
+  interface NDEFWriteOptions {
+    records: Array<{
+      recordType: string;
+      data: string;
+    }>;
+  }
+
+  interface NDEFReader {
+    write(data: NDEFWriteOptions): Promise<void>;
+  }
+
+  interface Window {
+    NDEFReader: {
+      new (): NDEFReader;
+    };
+  }
+}
+
 type ProvisionUser = {
   id: string;
   email: string;
@@ -48,6 +67,47 @@ export default function ProvisionCardModal({
     setTimeout(onClose, 300);
   }, [cleanup, onClose]);
 
+  /* ---------------- NFC WRITE ---------------- */
+  async function writeCard(reqId: string) {
+    if (!("NDEFReader" in window)) {
+      alert("Web NFC not supported on this device/browser.");
+      handleCancel();
+      return;
+    }
+
+    try {
+      const secret = crypto.randomUUID();
+
+      const ndef = new window.NDEFReader();
+
+      await ndef.write({
+        records: [
+          {
+            recordType: "text",
+            data: JSON.stringify({
+              tpf: "1",
+              secret,
+            }),
+          },
+        ],
+      });
+
+      await fetch("/api/admin/provision-card/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requestId: reqId,
+          cardSecret: secret,
+        }),
+      });
+
+    } catch (err) {
+      console.error("NFC Write Failed:", err);
+      alert("Failed to write card.");
+      handleCancel();
+    }
+  }
+
   /* ---------------- CREATE REQUEST ---------------- */
   useEffect(() => {
     if (!open || !user) return;
@@ -57,7 +117,7 @@ export default function ProvisionCardModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: user!.id,
+          userId: user!.id,   // non-null assertion (safe)
           pin,
         }),
       });
@@ -70,15 +130,12 @@ export default function ProvisionCardModal({
         return;
       }
 
-      console.log("🟡 CARD PROVISION REQUEST CREATED");
-      console.log("➡️ requestId:", data.requestId);
-      console.log(
-        "➡️ Simulate NFC using POST /api/admin/provision-card/confirm"
-      );
-
       setRequestId(data.requestId);
       setStatus("WAITING");
       setSecondsLeft(20);
+
+      // 🔥 REAL NFC WRITE
+      await writeCard(data.requestId);
     }
 
     createRequest();
@@ -123,7 +180,7 @@ export default function ProvisionCardModal({
         cleanup();
         setStatus("SUCCESS");
       }
-    }, 2000);
+    }, 1500);
 
     return () => {
       if (pollRef.current !== null) {
@@ -146,12 +203,12 @@ export default function ProvisionCardModal({
 
             {user.hasCard && (
               <p className="text-yellow-400 text-sm mb-3">
-                ⚠️ Existing card will be deactivated
+                ⚠️ Existing card will be overwritten
               </p>
             )}
 
             <p className="text-gray-400 mb-4">
-              Hold the card near the reader
+              Hold the card near the phone
             </p>
 
             <div className="animate-pulse text-6xl mb-4">📶</div>

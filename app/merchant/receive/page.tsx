@@ -1,22 +1,45 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useRef } from "react";
 import PaymentSuccess from "../../components/PaymentSuccess";
 import PaymentFailure from "../../components/PaymentFailure";
+
+declare global {
+  interface NDEFScanRecord {
+    recordType: string;
+    data?: DataView;
+  }
+
+  interface NDEFReadingEvent {
+    message: {
+      records: NDEFScanRecord[];
+    };
+  }
+
+  interface NDEFReader {
+    scan(): Promise<void>;
+    onreading: ((event: NDEFReadingEvent) => void) | null;
+  }
+
+  interface Window {
+    NDEFReader: {
+      new (): NDEFReader;
+    };
+  }
+}
 
 type State = "ENTER" | "WAITING" | "SUCCESS" | "FAILED";
 
 const WAIT_SECONDS = 15;
 
 export default function ReceivePayment() {
-  const router = useRouter();
-
   const [amount, setAmount] = useState("");
   const [state, setState] = useState<State>("ENTER");
   const [requestId, setRequestId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [timeLeft, setTimeLeft] = useState(WAIT_SECONDS);
+
+  const nfcStartedRef = useRef(false);
 
   /* ---------------- CREATE REQUEST ---------------- */
   async function createRequest() {
@@ -45,23 +68,80 @@ export default function ReceivePayment() {
     setState("WAITING");
   }
 
-  /* ---------------- COUNTDOWN ---------------- */
-  useEffect(() => {
-    if (state !== "WAITING") return;
-
-    if (timeLeft <= 0) {
-      setState("FAILED");
+  /* ---------------- NFC READ ---------------- */
+  async function startNfcReader(reqId: string) {
+    if (!("NDEFReader" in window)) {
+      alert("Web NFC not supported on this device/browser.");
       return;
     }
 
-    const timer = setTimeout(() => {
-      setTimeLeft((t) => t - 1);
-    }, 1000);
+    try {
+      const ndef = new window.NDEFReader();
+      await ndef.scan();
 
-    return () => clearTimeout(timer);
-  }, [state, timeLeft]);
+      ndef.onreading = async (event) => {
+        if (!event.message.records.length) return;
 
-  /* ---------------- POLLING ---------------- */
+        const record = event.message.records[0];
+        if (!record.data) return;
+
+        const decoder = new TextDecoder();
+        const decoded = decoder.decode(record.data);
+        const parsed = JSON.parse(decoded);
+
+        if (!parsed.secret) {
+          setState("FAILED");
+          return;
+        }
+
+        const res = await fetch("/api/nfc/authorize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            requestId: reqId,
+            cardSecret: parsed.secret,
+          }),
+        });
+
+        const result = await res.json();
+
+        if (result.ok) {
+          setState("SUCCESS");
+        } else {
+          setState("FAILED");
+        }
+      };
+    } catch (err) {
+      console.error("NFC Read Error:", err);
+    }
+  }
+
+  /* ---------------- START NFC WHEN WAITING ---------------- */
+  useEffect(() => {
+    if (state === "WAITING" && requestId && !nfcStartedRef.current) {
+      nfcStartedRef.current = true;
+      startNfcReader(requestId);
+    }
+  }, [state, requestId]);
+
+  /* ---------------- COUNTDOWN ---------------- */
+  /* ---------------- COUNTDOWN ---------------- */
+useEffect(() => {
+  if (state !== "WAITING") return;
+
+  const timer = setTimeout(() => {
+    setTimeLeft((t) => {
+      if (t <= 1) {
+        setState("FAILED");
+        return 0;
+      }
+      return t - 1;
+    });
+  }, 1000);
+
+  return () => clearTimeout(timer);
+}, [state, timeLeft]);
+  /* ---------------- POLLING BACKUP ---------------- */
   useEffect(() => {
     if (!requestId || state !== "WAITING" || timeLeft <= 0) return;
 
@@ -94,19 +174,19 @@ export default function ReceivePayment() {
     setRequestId(null);
     setTimeLeft(WAIT_SECONDS);
     setState("ENTER");
+    nfcStartedRef.current = false;
   }
-  /* ---------------- AUTO REDIRECT (3s) ---------------- */
-useEffect(() => {
-  if (state !== "SUCCESS") return;
 
-  const timer = setTimeout(() => {
-    reset(); 
-    // OR router.push("/merchant") if you want dashboard instead
-  }, 3000);
+  /* ---------------- AUTO RESET AFTER SUCCESS ---------------- */
+  useEffect(() => {
+    if (state !== "SUCCESS") return;
 
-  return () => clearTimeout(timer);
-}, [state]);
+    const timer = setTimeout(() => {
+      reset();
+    }, 3000);
 
+    return () => clearTimeout(timer);
+  }, [state]);
 
   /* ---------------- CANCEL ---------------- */
   async function cancelRequest() {
@@ -122,9 +202,8 @@ useEffect(() => {
     <div className="flex-1 flex items-center justify-center text-white">
       <div className="w-full max-w-md bg-gray-900 p-6 rounded-2xl">
 
-        {/* ENTER */}
         {state === "ENTER" && (
-          <div className="animate-fade-in">
+          <div>
             <h1 className="text-xl mb-4">Enter Amount</h1>
 
             <input
@@ -148,9 +227,8 @@ useEffect(() => {
           </div>
         )}
 
-        {/* WAITING */}
         {state === "WAITING" && (
-          <div className="flex flex-col items-center space-y-6 animate-fade-in">
+          <div className="flex flex-col items-center space-y-6">
             <div className="relative w-40 h-40 flex items-center justify-center">
               <div className="absolute w-full h-full rounded-full bg-indigo-500/30 animate-ping" />
               <div className="absolute w-28 h-28 rounded-full bg-indigo-500/40 animate-pulse" />
@@ -175,7 +253,6 @@ useEffect(() => {
           </div>
         )}
 
-        {/* SUCCESS */}
         {state === "SUCCESS" && (
           <PaymentSuccess
             amount={Number(amount)}
@@ -183,11 +260,8 @@ useEffect(() => {
           />
         )}
 
-        {/* FAILED */}
         {state === "FAILED" && (
-          <PaymentFailure
-            onRetry={reset}
-          />
+          <PaymentFailure onRetry={reset} />
         )}
 
       </div>

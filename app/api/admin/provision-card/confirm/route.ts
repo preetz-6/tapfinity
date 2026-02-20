@@ -43,7 +43,6 @@ export async function POST(req: NextRequest) {
 
     const request = await prisma.provisionCardRequest.findUnique({
       where: { id: requestId },
-      include: { user: true },
     });
 
     if (!request) {
@@ -72,17 +71,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    /* -------- USE PROVIDED CARD SECRET -------- */
+    /* -------- HASH SECRET -------- */
     const cardSecretHash = hashCardSecret(cardSecret);
 
     await prisma.$transaction(async tx => {
-      // store hash of NFC-provided secret
+      // 🔥 SAFETY FIX:
+      // Remove this secret from any other user first
+      await tx.user.updateMany({
+        where: { cardSecretHash },
+        data: { cardSecretHash: null },
+      });
+
+      // Assign to intended user
       await tx.user.update({
         where: { id: request.userId },
         data: { cardSecretHash },
       });
 
-      // mark request completed
+      // Mark request completed
       await tx.provisionCardRequest.update({
         where: { id: requestId },
         data: { status: "COMPLETED" },
@@ -93,6 +99,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       status: "COMPLETED",
     });
+
   } catch (err) {
     console.error("PROVISION CONFIRM ERROR:", err);
     return NextResponse.json(
