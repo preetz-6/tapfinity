@@ -74,114 +74,52 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    /* -------------------- PAYMENT REQUEST -------------------- */
-    const paymentRequest = await prisma.paymentRequest.findUnique({
-      where: { id: requestId },
-    });
-
-    if (!paymentRequest) {
-      return NextResponse.json(
-        { error: "Invalid payment request" },
-        { status: 404 }
-      );
-    }
-
-    if (paymentRequest.status !== "PENDING") {
-      await logAttempt({
-        merchantId: paymentRequest.merchantId,
-        paymentRequestId: requestId,
-        amount: paymentRequest.amount,
-        status: "FAILED",
-        failureReason: "REQUEST_NOT_PENDING",
-        ipAddress: ip,
-      });
-
-      return NextResponse.json(
-        { error: "Payment request already used or expired" },
-        { status: 409 }
-      );
-    }
-
-    if (paymentRequest.expiresAt < new Date()) {
-      await prisma.paymentRequest.update({
-        where: { id: requestId },
-        data: { status: "EXPIRED" },
-      });
-
-      await logAttempt({
-        merchantId: paymentRequest.merchantId,
-        paymentRequestId: requestId,
-        amount: paymentRequest.amount,
-        status: "FAILED",
-        failureReason: "REQUEST_EXPIRED",
-        ipAddress: ip,
-      });
-
-      return NextResponse.json(
-        { error: "Payment request expired" },
-        { status: 410 }
-      );
-    }
-
-    /* -------------------- CARD AUTH -------------------- */
     const secretHash = hashCardSecret(cardSecret);
-
-    const user = await prisma.user.findUnique({
-      where: { cardSecretHash: secretHash },
-    });
-
-    if (!user) {
-      await logAttempt({
-        merchantId: paymentRequest.merchantId,
-        paymentRequestId: requestId,
-        amount: paymentRequest.amount,
-        status: "FAILED",
-        failureReason: "CARD_NOT_PROVISIONED",
-        ipAddress: ip,
-      });
-
-      return NextResponse.json(
-        { error: "Invalid or unprovisioned card" },
-        { status: 403 }
-      );
-    }
-
-    if (user.status !== "ACTIVE") {
-      await logAttempt({
-        merchantId: paymentRequest.merchantId,
-        userId: user.id,
-        paymentRequestId: requestId,
-        amount: paymentRequest.amount,
-        status: "FAILED",
-        failureReason: "USER_BLOCKED",
-        ipAddress: ip,
-      });
-
-      return NextResponse.json(
-        { error: "User is blocked" },
-        { status: 403 }
-      );
-    }
-
-    if (user.balance < paymentRequest.amount) {
-      await logAttempt({
-        merchantId: paymentRequest.merchantId,
-        userId: user.id,
-        paymentRequestId: requestId,
-        amount: paymentRequest.amount,
-        status: "FAILED",
-        failureReason: "INSUFFICIENT_BALANCE",
-        ipAddress: ip,
-      });
-
-      return NextResponse.json(
-        { error: "Insufficient balance" },
-        { status: 409 }
-      );
-    }
 
     /* -------------------- ATOMIC TRANSACTION -------------------- */
     const result = await prisma.$transaction(async (tx) => {
+
+      // 🔒 RACE CONDITION FIX
+      const locked = await tx.paymentRequest.updateMany({
+        where: {
+          id: requestId,
+          status: "PENDING",
+          expiresAt: { gt: new Date() },
+        },
+        data: {
+          status: "USED",
+        },
+      });
+
+      if (locked.count === 0) {
+        throw new Error("REQUEST_ALREADY_PROCESSED");
+      }
+
+      const paymentRequest = await tx.paymentRequest.findUnique({
+        where: { id: requestId },
+      });
+
+      if (!paymentRequest) {
+        throw new Error("Invalid payment request");
+      }
+
+      /* -------------------- CARD AUTH -------------------- */
+      const user = await tx.user.findUnique({
+        where: { cardSecretHash: secretHash },
+      });
+
+      if (!user) {
+        throw new Error("CARD_NOT_PROVISIONED");
+      }
+
+      if (user.status !== "ACTIVE") {
+        throw new Error("USER_BLOCKED");
+      }
+
+      if (user.balance < paymentRequest.amount) {
+        throw new Error("INSUFFICIENT_BALANCE");
+      }
+
       const updatedUser = await tx.user.update({
         where: { id: user.id },
         data: {
@@ -206,22 +144,19 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      await tx.paymentRequest.update({
-        where: { id: requestId },
-        data: { status: "USED" },
+      // ✅ LOG SUCCESS (kept exactly as your style)
+      await tx.paymentAttemptLog.create({
+        data: {
+          merchantId: paymentRequest.merchantId,
+          userId: user.id,
+          paymentRequestId: requestId,
+          amount: paymentRequest.amount,
+          status: "SUCCESS",
+          ipAddress: ip,
+        },
       });
 
-      // ✅ LOG SUCCESS
-      await logAttempt({
-        merchantId: paymentRequest.merchantId,
-        userId: user.id,
-        paymentRequestId: requestId,
-        amount: paymentRequest.amount,
-        status: "SUCCESS",
-        ipAddress: ip,
-      });
-
-      return { updatedUser, transaction };
+      return { updatedUser, transaction, user };
     });
 
     /* -------------------- SUCCESS -------------------- */
@@ -230,22 +165,19 @@ export async function POST(req: NextRequest) {
       transactionId: result.transaction.id,
       balance: result.updatedUser.balance,
       user: {
-        name: user.name,
-        email: user.email,
+        name: result.user.name,
+        email: result.user.email,
       },
     });
-  } catch (err) {
-    console.error("NFC AUTHORIZE ERROR:", err);
 
-    // BEST-EFFORT LOG
-    try {
-      // paymentRequest may not exist here, so guard
-      // (no await blocking response)
-    } catch {}
+  } catch (err: unknown) {
+
+    const message =
+      err instanceof Error ? err.message : "Server error";
 
     return NextResponse.json(
-      { error: "Server error" },
-      { status: 500 }
+      { error: message },
+      { status: 400 }
     );
   }
 }

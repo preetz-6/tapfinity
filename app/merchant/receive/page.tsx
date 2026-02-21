@@ -19,6 +19,7 @@ declare global {
   interface NDEFReader {
     scan(): Promise<void>;
     onreading: ((event: NDEFReadingEvent) => void) | null;
+    abort(): Promise<void>;
   }
 
   interface Window {
@@ -40,6 +41,8 @@ export default function ReceivePayment() {
   const [timeLeft, setTimeLeft] = useState(WAIT_SECONDS);
 
   const nfcStartedRef = useRef(false);
+  const nfcProcessedRef = useRef(false);
+  const ndefRef = useRef<NDEFReader | null>(null);
 
   /* ---------------- CREATE REQUEST ---------------- */
   async function createRequest() {
@@ -77,40 +80,64 @@ export default function ReceivePayment() {
 
     try {
       const ndef = new window.NDEFReader();
+      ndefRef.current = ndef;
+
       await ndef.scan();
 
       ndef.onreading = async (event) => {
-        if (!event.message.records.length) return;
 
-        const record = event.message.records[0];
-        if (!record.data) return;
+        // 🔒 HARD DEBOUNCE — only first tap allowed
+        if (nfcProcessedRef.current) return;
+        nfcProcessedRef.current = true;
 
-        const decoder = new TextDecoder();
-        const decoded = decoder.decode(record.data);
-        const parsed = JSON.parse(decoded);
-
-        if (!parsed.secret) {
+        if (!event.message.records.length) {
           setState("FAILED");
           return;
         }
 
-        const res = await fetch("/api/nfc/authorize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            requestId: reqId,
-            cardSecret: parsed.secret,
-          }),
-        });
+        const record = event.message.records[0];
+        if (!record.data) {
+          setState("FAILED");
+          return;
+        }
 
-        const result = await res.json();
+        try {
+          const decoder = new TextDecoder();
+          const decoded = decoder.decode(record.data);
+          const parsed = JSON.parse(decoded);
 
-        if (result.ok) {
-          setState("SUCCESS");
-        } else {
+          if (!parsed.secret) {
+            setState("FAILED");
+            return;
+          }
+
+          const res = await fetch("/api/nfc/authorize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              requestId: reqId,
+              cardSecret: parsed.secret,
+            }),
+          });
+
+          const result = await res.json();
+
+          if (result.ok) {
+            setState("SUCCESS");
+          } else {
+            setState("FAILED");
+          }
+
+        } catch {
           setState("FAILED");
         }
+
+        // 🔥 Stop NFC after first read
+        try {
+          await ndef.abort();
+        } catch {}
       };
+
     } catch (err) {
       console.error("NFC Read Error:", err);
     }
@@ -120,27 +147,28 @@ export default function ReceivePayment() {
   useEffect(() => {
     if (state === "WAITING" && requestId && !nfcStartedRef.current) {
       nfcStartedRef.current = true;
+      nfcProcessedRef.current = false;
       startNfcReader(requestId);
     }
   }, [state, requestId]);
 
   /* ---------------- COUNTDOWN ---------------- */
-  /* ---------------- COUNTDOWN ---------------- */
-useEffect(() => {
-  if (state !== "WAITING") return;
+  useEffect(() => {
+    if (state !== "WAITING") return;
 
-  const timer = setTimeout(() => {
-    setTimeLeft((t) => {
-      if (t <= 1) {
-        setState("FAILED");
-        return 0;
-      }
-      return t - 1;
-    });
-  }, 1000);
+    const timer = setTimeout(() => {
+      setTimeLeft((t) => {
+        if (t <= 1) {
+          setState("FAILED");
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
 
-  return () => clearTimeout(timer);
-}, [state, timeLeft]);
+    return () => clearTimeout(timer);
+  }, [state, timeLeft]);
+
   /* ---------------- POLLING BACKUP ---------------- */
   useEffect(() => {
     if (!requestId || state !== "WAITING" || timeLeft <= 0) return;
@@ -175,6 +203,11 @@ useEffect(() => {
     setTimeLeft(WAIT_SECONDS);
     setState("ENTER");
     nfcStartedRef.current = false;
+    nfcProcessedRef.current = false;
+
+    try {
+      ndefRef.current?.abort();
+    } catch {}
   }
 
   /* ---------------- AUTO RESET AFTER SUCCESS ---------------- */
