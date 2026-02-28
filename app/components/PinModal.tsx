@@ -17,20 +17,31 @@ export default function PinModal({
 }) {
   const [pin, setPin] = useState("");
 
-  // 🔥 RESET PIN EVERY TIME MODAL OPENS
+  /* 🔒 Lock background scroll */
   useEffect(() => {
-    if (open) {
-      setPin("");
+    if (!open) {
+      document.body.style.overflow = "";
+      return;
     }
+
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = "";
+    };
   }, [open]);
 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-full max-w-sm rounded-xl bg-[#0b1226] p-6 border border-white/10">
-        <h2 className="text-lg font-semibold mb-2">Confirm with PIN</h2>
-        <p className="text-sm text-gray-400 mb-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+      <div className="w-full max-w-sm rounded-xl bg-[#0b1226] p-6 border border-white/10 shadow-2xl">
+
+        <h2 className="text-lg font-semibold mb-2 text-center">
+          Confirm with PIN
+        </h2>
+
+        <p className="text-sm text-gray-400 mb-4 text-center">
           Enter your 6-digit admin PIN to continue
         </p>
 
@@ -39,27 +50,37 @@ export default function PinModal({
           inputMode="numeric"
           maxLength={6}
           value={pin}
-          onChange={e => setPin(e.target.value.replace(/\D/g, ""))}
+          onChange={(e) =>
+            setPin(e.target.value.replace(/\D/g, ""))
+          }
           placeholder="••••••"
-          className="w-full rounded-lg bg-black/30 border border-white/10 p-3 text-center tracking-widest text-lg"
+          className="w-full rounded-lg bg-black/30 border border-white/10 p-3 text-center tracking-widest text-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
 
         {error && (
-          <p className="mt-2 text-sm text-red-400 text-center">{error}</p>
+          <p className="mt-2 text-sm text-red-400 text-center">
+            {error}
+          </p>
         )}
 
         <div className="mt-6 flex gap-3">
           <button
-            onClick={onClose}
-            className="flex-1 rounded-lg border border-white/10 py-2 text-sm"
+            onClick={() => {
+              setPin("");      // ✅ reset safely here
+              onClose();
+            }}
+            className="flex-1 rounded-lg border border-white/10 py-2 text-sm hover:bg-white/5 transition"
             disabled={loading}
           >
             Cancel
           </button>
 
           <button
-            onClick={() => onSubmit(pin)}
-            className="flex-1 rounded-lg bg-blue-600 py-2 text-sm"
+            onClick={() => {
+              onSubmit(pin);
+              setPin("");      // ✅ reset after submit
+            }}
+            className="flex-1 rounded-lg bg-blue-600 py-2 text-sm hover:bg-blue-500 transition active:scale-95"
             disabled={loading || pin.length !== 6}
           >
             {loading ? "Verifying…" : "Confirm"}

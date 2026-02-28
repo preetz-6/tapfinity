@@ -44,7 +44,6 @@ export default function ReceivePayment() {
   const nfcProcessedRef = useRef(false);
   const ndefRef = useRef<NDEFReader | null>(null);
 
-  /* ---------------- CREATE REQUEST ---------------- */
   async function createRequest() {
     setError("");
 
@@ -71,7 +70,6 @@ export default function ReceivePayment() {
     setState("WAITING");
   }
 
-  /* ---------------- NFC READ ---------------- */
   async function startNfcReader(reqId: string) {
     if (!("NDEFReader" in window)) {
       alert("Web NFC not supported on this device/browser.");
@@ -85,8 +83,6 @@ export default function ReceivePayment() {
       await ndef.scan();
 
       ndef.onreading = async (event) => {
-
-        // 🔒 HARD DEBOUNCE — only first tap allowed
         if (nfcProcessedRef.current) return;
         nfcProcessedRef.current = true;
 
@@ -122,17 +118,13 @@ export default function ReceivePayment() {
 
           const result = await res.json();
 
-          if (result.ok) {
-            setState("SUCCESS");
-          } else {
-            setState("FAILED");
-          }
+          if (result.ok) setState("SUCCESS");
+          else setState("FAILED");
 
         } catch {
           setState("FAILED");
         }
 
-        // 🔥 Stop NFC after first read
         try {
           await ndef.abort();
         } catch {}
@@ -143,7 +135,6 @@ export default function ReceivePayment() {
     }
   }
 
-  /* ---------------- START NFC WHEN WAITING ---------------- */
   useEffect(() => {
     if (state === "WAITING" && requestId && !nfcStartedRef.current) {
       nfcStartedRef.current = true;
@@ -152,7 +143,6 @@ export default function ReceivePayment() {
     }
   }, [state, requestId]);
 
-  /* ---------------- COUNTDOWN ---------------- */
   useEffect(() => {
     if (state !== "WAITING") return;
 
@@ -169,15 +159,11 @@ export default function ReceivePayment() {
     return () => clearTimeout(timer);
   }, [state, timeLeft]);
 
-  /* ---------------- POLLING BACKUP ---------------- */
   useEffect(() => {
     if (!requestId || state !== "WAITING" || timeLeft <= 0) return;
 
     const interval = setInterval(async () => {
-      const res = await fetch(
-        `/api/merchant/payment-request/${requestId}`
-      );
-
+      const res = await fetch(`/api/merchant/payment-request/${requestId}`);
       if (!res.ok) return;
 
       const data = await res.json();
@@ -196,7 +182,6 @@ export default function ReceivePayment() {
     return () => clearInterval(interval);
   }, [requestId, state, timeLeft]);
 
-  /* ---------------- RESET ---------------- */
   function reset() {
     setAmount("");
     setRequestId(null);
@@ -210,18 +195,12 @@ export default function ReceivePayment() {
     } catch {}
   }
 
-  /* ---------------- AUTO RESET AFTER SUCCESS ---------------- */
   useEffect(() => {
     if (state !== "SUCCESS") return;
-
-    const timer = setTimeout(() => {
-      reset();
-    }, 3000);
-
+    const timer = setTimeout(reset, 3000);
     return () => clearTimeout(timer);
   }, [state]);
 
-  /* ---------------- CANCEL ---------------- */
   async function cancelRequest() {
     if (requestId) {
       await fetch(`/api/merchant/payment-request/${requestId}`, {
@@ -232,50 +211,56 @@ export default function ReceivePayment() {
   }
 
   return (
-    <div className="flex-1 flex items-center justify-center text-white">
-      <div className="w-full max-w-md bg-gray-900 p-6 rounded-2xl">
+    <div className="min-h-screen flex items-center justify-center bg-black text-white px-4">
+      <div className="w-full max-w-md bg-gray-900 p-6 sm:p-8 rounded-2xl shadow-2xl">
 
         {state === "ENTER" && (
-          <div>
-            <h1 className="text-xl mb-4">Enter Amount</h1>
+          <div className="space-y-4">
+            <h1 className="text-xl sm:text-2xl font-semibold">
+              Enter Amount
+            </h1>
 
             <input
               type="number"
               placeholder="₹ Amount"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              className="w-full p-4 rounded-xl bg-gray-800 text-lg mb-4"
+              className="w-full p-4 rounded-xl bg-gray-800 text-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
 
             <button
               onClick={createRequest}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-pink-500 to-indigo-600 text-lg font-semibold"
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-pink-500 to-indigo-600 text-lg font-semibold active:scale-95 transition"
             >
               Continue
             </button>
 
             {error && (
-              <p className="text-red-400 text-sm mt-3">{error}</p>
+              <p className="text-red-400 text-sm">{error}</p>
             )}
           </div>
         )}
 
         {state === "WAITING" && (
-          <div className="flex flex-col items-center space-y-6">
-            <div className="relative w-40 h-40 flex items-center justify-center">
+          <div className="flex flex-col items-center space-y-6 text-center">
+            <div className="relative w-32 h-32 sm:w-40 sm:h-40 flex items-center justify-center">
               <div className="absolute w-full h-full rounded-full bg-indigo-500/30 animate-ping" />
-              <div className="absolute w-28 h-28 rounded-full bg-indigo-500/40 animate-pulse" />
-              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-pink-500 to-indigo-600 flex items-center justify-center text-2xl shadow-xl">
+              <div className="absolute w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-indigo-500/40 animate-pulse" />
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-pink-500 to-indigo-600 flex items-center justify-center text-xl sm:text-2xl shadow-xl">
                 📳
               </div>
             </div>
 
-            <p className="text-lg">
-              Waiting for tap…{" "}
-              <span className="text-gray-400">({timeLeft}s)</span>
+            <p className="text-base sm:text-lg">
+              Waiting for tap…
+              <span className="text-gray-400 ml-2">
+                ({timeLeft}s)
+              </span>
             </p>
 
-            <p className="text-4xl font-bold">₹{amount}</p>
+            <p className="text-3xl sm:text-4xl font-bold">
+              ₹{amount}
+            </p>
 
             <button
               onClick={cancelRequest}
@@ -287,10 +272,7 @@ export default function ReceivePayment() {
         )}
 
         {state === "SUCCESS" && (
-          <PaymentSuccess
-            amount={Number(amount)}
-            onDone={reset}
-          />
+          <PaymentSuccess amount={Number(amount)} onDone={reset} />
         )}
 
         {state === "FAILED" && (

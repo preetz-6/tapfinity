@@ -36,7 +36,6 @@ export default function AdminUsersPage() {
   const [pinError, setPinError] = useState("");
   const [pinAction, setPinAction] = useState<PinAction | null>(null);
 
-  /* ---------------- FETCH USERS ---------------- */
   const fetchUsers = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/users");
@@ -53,7 +52,6 @@ export default function AdminUsersPage() {
     fetchUsers();
   }, [fetchUsers]);
 
-  /* ---------------- SEARCH ---------------- */
   const filteredUsers = useMemo(() => {
     const q = search.toLowerCase();
     return users.filter(
@@ -63,16 +61,17 @@ export default function AdminUsersPage() {
     );
   }, [users, search]);
 
-  if (loading) return <p>Loading users…</p>;
+  if (loading) return <p className="p-4">Loading users…</p>;
 
   return (
-    <div>
+    <div className="p-4 sm:p-6 space-y-6">
+
       {/* HEADER */}
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <h1 className="text-2xl font-semibold">User Management</h1>
         <button
           onClick={() => setShowCreateModal(true)}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm"
+          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium active:scale-95 transition"
         >
           + Create User
         </button>
@@ -83,13 +82,13 @@ export default function AdminUsersPage() {
         placeholder="Search by name or email"
         value={search}
         onChange={e => setSearch(e.target.value)}
-        className="mb-4 w-full max-w-sm rounded-lg bg-black/30 border border-white/10 p-2 text-sm"
+        className="w-full sm:max-w-sm rounded-lg bg-black/30 border border-white/10 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
       />
 
       {/* TABLE */}
       <div className="overflow-x-auto rounded-xl border border-white/10">
-        <table className="w-full text-sm">
-          <thead className="bg-white/5">
+        <table className="min-w-[650px] w-full text-sm">
+          <thead className="bg-white/5 text-gray-300">
             <tr>
               <th className="p-3 text-left">Name</th>
               <th className="p-3 text-left">Email</th>
@@ -100,10 +99,19 @@ export default function AdminUsersPage() {
           </thead>
           <tbody>
             {filteredUsers.map(u => (
-              <tr key={u.id} className="border-t border-white/10">
-                <td className="p-3">{u.name ?? "-"}</td>
-                <td className="p-3">{u.email}</td>
-                <td className="p-3">₹ {u.balance}</td>
+              <tr
+                key={u.id}
+                className="border-t border-white/10 hover:bg-white/5 transition"
+              >
+                <td className="p-3 whitespace-nowrap">
+                  {u.name ?? "-"}
+                </td>
+                <td className="p-3 whitespace-nowrap">
+                  {u.email}
+                </td>
+                <td className="p-3 whitespace-nowrap">
+                  ₹ {u.balance}
+                </td>
                 <td className="p-3">
                   <span
                     className={`rounded-full px-3 py-1 text-xs ${
@@ -115,39 +123,38 @@ export default function AdminUsersPage() {
                     {u.status}
                   </span>
                 </td>
-                <td className="p-3 flex gap-2">
-                  {/* CARD */}
-                  <ActionButton
-                    label="Card"
-                    color="blue"
-                    onClick={() => {
-                      setSelectedUser(u);
-                      setPinAction("CARD");
-                      setPinOpen(true);
-                    }}
-                  />
+                <td className="p-3">
+                  <div className="flex flex-wrap gap-2">
+                    <ActionButton
+                      label="Card"
+                      color="blue"
+                      onClick={() => {
+                        setSelectedUser(u);
+                        setPinAction("CARD");
+                        setPinOpen(true);
+                      }}
+                    />
 
-                  {/* BLOCK / UNBLOCK */}
-                  <ActionButton
-                    label={u.status === "ACTIVE" ? "Block" : "Unblock"}
-                    color="yellow"
-                    onClick={() => {
-                      setSelectedUser(u);
-                      setPinAction("BLOCK");
-                      setPinOpen(true);
-                    }}
-                  />
+                    <ActionButton
+                      label={u.status === "ACTIVE" ? "Block" : "Unblock"}
+                      color="yellow"
+                      onClick={() => {
+                        setSelectedUser(u);
+                        setPinAction("BLOCK");
+                        setPinOpen(true);
+                      }}
+                    />
 
-                  {/* TOP-UP */}
-                  <ActionButton
-                    label="Top-up"
-                    color="green"
-                    disabled={u.status !== "ACTIVE"}
-                    onClick={() => {
-                      setSelectedUser(u);
-                      setShowTopupModal(true);
-                    }}
-                  />
+                    <ActionButton
+                      label="Top-up"
+                      color="green"
+                      disabled={u.status !== "ACTIVE"}
+                      onClick={() => {
+                        setSelectedUser(u);
+                        setShowTopupModal(true);
+                      }}
+                    />
+                  </div>
                 </td>
               </tr>
             ))}
@@ -193,7 +200,6 @@ export default function AdminUsersPage() {
             return;
           }
 
-          // CARD FLOW (unchanged)
           setPinLoading(false);
           setPinOpen(false);
           setPinAction(null);
@@ -202,7 +208,6 @@ export default function AdminUsersPage() {
         }}
       />
 
-      {/* PROVISION CARD */}
       {cardUser && (
         <ProvisionCardModal
           open
@@ -220,14 +225,12 @@ export default function AdminUsersPage() {
         />
       )}
 
-      {/* CREATE USER */}
       <CreateUserModal
         open={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         onSuccess={fetchUsers}
       />
 
-      {/* TOP-UP */}
       {selectedUser && (
         <TopUpModal
           open={showTopupModal}
@@ -253,17 +256,19 @@ function ActionButton({
   disabled?: boolean;
 }) {
   const colors = {
-    blue: "bg-blue-600",
-    yellow: "bg-yellow-500 text-black",
-    green: "bg-green-600",
+    blue: "bg-blue-600 hover:bg-blue-500",
+    yellow: "bg-yellow-500 text-black hover:bg-yellow-400",
+    green: "bg-green-600 hover:bg-green-500",
   };
 
   return (
     <button
       disabled={disabled}
       onClick={onClick}
-      className={`rounded-md px-3 py-1 text-xs font-medium ${
-        disabled ? "opacity-40 cursor-not-allowed" : colors[color]
+      className={`rounded-md px-3 py-1 text-xs font-medium transition active:scale-95 ${
+        disabled
+          ? "opacity-40 cursor-not-allowed"
+          : colors[color]
       }`}
     >
       {label}
